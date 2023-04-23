@@ -18,7 +18,7 @@
 //! ```
 //! use event_sync::EventSync;
 //!
-//! let tickrate = 10; // 10ms per tick
+//! let tickrate = 10; // 10ms between every tick
 //!
 //! // Create an event synchronizer with a 10ms tickrate.
 //! let event_sync = EventSync::new(tickrate);
@@ -58,7 +58,7 @@ mod errors;
 /// ```
 /// use event_sync::EventSync;
 ///
-/// let tickrate = 10; // 10ms per tick
+/// let tickrate = 10; // 10ms between every tick
 ///
 /// // Create an event synchronizer with a 10ms tickrate.
 /// let event_sync = EventSync::new(tickrate);
@@ -71,7 +71,7 @@ mod errors;
 /// use event_sync::EventSync;
 /// use std::time::Instant;
 ///
-/// let tickrate = 10; // 10ms per tick
+/// let tickrate = 10; // 10ms between every tick
 /// let event_sync = EventSync::new(tickrate as u32);
 ///
 /// let start = Instant::now();
@@ -90,7 +90,7 @@ mod errors;
 /// use event_sync::EventSync;
 /// use std::thread;
 ///
-/// let tickrate = 10; // 10ms per tick
+/// let tickrate = 10; // 10ms between every tick
 /// let event_sync = EventSync::new(tickrate);
 ///
 /// let passed_event_sync = event_sync.clone();
@@ -133,7 +133,6 @@ impl EventSync {
     }
   }
 
-  // /// Waits until the passed in amount of ticks have occurred since EventSync creation.
   /// Waits until an absolute tick has occurred since EventSync creation.
   ///
   /// That means, if you created an instance of EventSync with a tickrate of 10ms,
@@ -145,7 +144,7 @@ impl EventSync {
   /// ```
   /// use event_sync::EventSync;
   ///
-  /// let tickrate = 10; // 10ms per tick
+  /// let tickrate = 10; // 10ms between every tick
   /// let event_sync = EventSync::new(tickrate);
   ///
   /// // Wait 1 second from the creation of event_sync.
@@ -178,7 +177,7 @@ impl EventSync {
   /// ```
   /// use event_sync::EventSync;
   ///
-  /// let tickrate = 10; // 10ms per tick
+  /// let tickrate = 10; // 10ms between every tick
   /// let event_sync = EventSync::new(tickrate);
   ///
   /// // wait until the next tick
@@ -197,7 +196,7 @@ impl EventSync {
   /// ```
   /// use event_sync::EventSync;
   ///
-  /// let tickrate = 10; // 10ms per tick
+  /// let tickrate = 10; // 10ms between every tick
   /// let event_sync = EventSync::new(tickrate);
   ///
   /// // wait for 3 ticks
@@ -216,7 +215,7 @@ impl EventSync {
   /// use event_sync::EventSync;
   /// use std::time::Duration;
   ///
-  /// let tickrate = 10; // 10ms per tick
+  /// let tickrate = 10; // 10ms between every tick
   /// let event_sync = EventSync::new(tickrate);
   ///
   /// // Wait until 5 ticks have occurred since EventSync creation.
@@ -244,7 +243,7 @@ impl EventSync {
   /// ```
   /// use event_sync::EventSync;
   ///
-  /// let tickrate = 10; // 10ms per tick
+  /// let tickrate = 10; // 10ms between every tick
   /// let event_sync = EventSync::new(tickrate);
   ///
   /// event_sync.wait_until(5);
