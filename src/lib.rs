@@ -260,8 +260,29 @@ impl EventSync {
       Err(_) => Err(TimeError::TimeHasReversed),
     }
   }
+
+  /// Returns the amount of time that has passed since the last tick
+  ///
+  /// # Errors
+  ///
+  /// - An error is returned when the system time has been reversed to before this EventSync was created.
+  pub fn time_since_last_tick(&self) -> Result<std::time::Duration, TimeError> {
+    Ok(Duration::from_millis(
+      (self.time_since_started()?.as_millis() % self.tickrate as u128) as u64,
+    ))
+  }
+
+  /// Returns the amount of time until the next tick will occurr.
+  ///
+  /// # Errors
+  ///
+  /// - An error is returned when the system time has been reversed to before this EventSync was created.
+  pub fn time_until_next_tick(&self) -> Result<std::time::Duration, TimeError> {
+    Ok(Duration::from_millis(self.tickrate as u64).saturating_sub(self.time_since_last_tick()?))
+  }
 }
 
+// Ticks have a chance to fail due to their time sensitive nature.
 #[cfg(test)]
 mod tests {
   use super::*;
@@ -306,7 +327,7 @@ mod tests {
 
     let time_since_started = event_sync.time_since_started().unwrap();
 
-    assert_eq!(time_since_started.as_millis(), 20);
+    assert_eq!(time_since_started.as_millis(), TEST_TICKRATE as u128 * 2);
   }
 
   #[test]
@@ -329,5 +350,36 @@ mod tests {
     let ticks_since_started = event_sync.ticks_since_started();
 
     assert_eq!(ticks_since_started, Ok(1));
+  }
+
+  #[test]
+  fn time_since_last_tick_logic() {
+    let event_sync = EventSync::new(TEST_TICKRATE);
+    let extra_wait_time = 2;
+
+    event_sync.wait_for_tick();
+
+    std::thread::sleep(Duration::from_millis(extra_wait_time as u64));
+
+    let time_since_last_tick = event_sync.time_since_last_tick().unwrap();
+
+    assert_eq!(time_since_last_tick.as_millis(), extra_wait_time);
+  }
+
+  #[test]
+  fn time_until_next_tick_logic() {
+    let event_sync = EventSync::new(TEST_TICKRATE);
+    let extra_wait_time = 2;
+
+    event_sync.wait_for_tick();
+
+    std::thread::sleep(Duration::from_millis(extra_wait_time as u64));
+
+    let time_since_last_tick = event_sync.time_until_next_tick().unwrap();
+
+    assert_eq!(
+      time_since_last_tick.as_millis(),
+      (TEST_TICKRATE as u128 - extra_wait_time)
+    );
   }
 }
