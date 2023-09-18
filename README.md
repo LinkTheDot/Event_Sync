@@ -14,7 +14,7 @@ exactly 10ms had ocurred since the last event. That would look something like
 this
 
 ```rust
-use event_sync::EventSync;
+use event_sync::*;
 
 let tickrate = 10; // 10ms between every tick.
 let event_sync = EventSync::new(tickrate);
@@ -35,7 +35,7 @@ The tickrate will be an integer represented as milliseconds, and cannot go
 below 1. If you pass in 0, 1 millisecond will be set as the tickrate.
 
 ```rust
-use event_sync::EventSync;
+use event_sync::*;
 
 let tickrate = 10; // 10ms between every tick
 
@@ -49,7 +49,7 @@ for the amount of ticks passed in.
 That would look something like this:
 
 ```rust
-use event_sync::EventSync;
+use event_sync::*;
 
 let tickrate = 10;
 let event_sync = EventSync::new(tickrate);
@@ -57,7 +57,7 @@ let event_sync = EventSync::new(tickrate);
 // multi-ms long task.
 
 // wait for the next 2 ticks
-even_sync.wait_for_x_ticks(2);
+event_sync.wait_for_x_ticks(2);
 // repeat the task
 ```
 
