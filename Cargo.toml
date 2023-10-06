@@ -11,3 +11,9 @@ description = "A crate that can be used to synchronize events to only occur betw
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+tokio = { version = "1.32.0", features = ["full"] }
+async-trait = "0.1.73"
+
+[features]
+async_waiting = []
+full = ["async_waiting"]

@@ -3,7 +3,14 @@
 use crate::errors::TimeError;
 use std::time::{Duration, SystemTime};
 
+#[cfg(feature = "async_waiting")]
+pub use crate::async_waiting::AsyncWaiting;
+#[cfg(not(feature = "async_waiting"))]
+pub use crate::std_waiting::StdWaiting;
+
+mod async_waiting;
 mod errors;
+mod std_waiting;
 
 /// A way to synchronize a dynamic number of threads through sleeping.
 ///
@@ -21,7 +28,7 @@ mod errors;
 /// If you pass in 0, 1 millisecond will be set as the tickrate.
 ///
 /// ```
-/// use event_sync::EventSync;
+/// use event_sync::*;
 ///
 /// let tickrate = 10; // 10ms between every tick
 ///
@@ -33,7 +40,7 @@ mod errors;
 ///
 /// # Time Tracking
 /// ```
-/// use event_sync::EventSync;
+/// use event_sync::*;
 /// use std::time::Instant;
 ///
 /// let tickrate = 10; // 10ms between every tick
@@ -52,7 +59,7 @@ mod errors;
 ///
 /// # Thread Synchronization
 /// ```
-/// use event_sync::EventSync;
+/// use event_sync::*;
 /// use std::thread;
 ///
 /// let tickrate = 10; // 10ms between every tick
@@ -74,7 +81,7 @@ mod errors;
 ///
 /// handle.join().unwrap();
 /// ```
-#[derive(Clone, Eq, PartialEq)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub struct EventSync {
   start_time: SystemTime,
   tickrate: u32,
@@ -233,7 +240,7 @@ impl EventSync {
   ///
   /// # Usage
   /// ```
-  /// use event_sync::EventSync;
+  /// use event_sync::*;
   /// use std::time::Duration;
   ///
   /// let tickrate = 10; // 10ms between every tick
@@ -262,7 +269,7 @@ impl EventSync {
   ///
   /// # Usage
   /// ```
-  /// use event_sync::EventSync;
+  /// use event_sync::*;
   ///
   /// let tickrate = 10; // 10ms between every tick
   /// let event_sync = EventSync::new(tickrate);
