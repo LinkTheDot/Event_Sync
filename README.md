@@ -1,9 +1,9 @@
 # Event Sync
 
-EventSync is a crate that can be used to synchronize events to only occurr
+EventSync is a crate that can be used to synchronize events to only occur
 between fixed gaps of time.
 
-Say you wanted an event to occurr every 10ms, but it takes a few milliseconds to
+Say you wanted an event to occur every 10ms, but it takes a few milliseconds to
 setup that event. You'd end up having to sleep 10ms + the time it took to setup
 the event.
 
