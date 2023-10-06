@@ -139,8 +139,19 @@ impl EventSync {
   }
 
   /// Restarts the starting time.
+  ///
+  /// This will only restart the starting time for this instance of EventSync.
+  /// Any other instances tied to this one will not be reset.
   pub fn restart(&mut self) {
     self.start_time = SystemTime::now()
+  }
+
+  /// Restarts the starting time.
+  ///
+  /// This will only change the tickrate for this instance of EventSync.
+  /// Any other instances tied to this one will not be changed.
+  pub fn change_tickrate(&mut self, new_tickrate: u32) {
+    self.tickrate = new_tickrate.max(1);
   }
 
   /// Waits until an absolute tick has occurred since EventSync creation.
