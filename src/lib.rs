@@ -3,14 +3,7 @@
 use crate::errors::TimeError;
 use std::time::{Duration, SystemTime};
 
-#[cfg(feature = "async_waiting")]
-pub use crate::async_waiting::AsyncWaiting;
-#[cfg(not(feature = "async_waiting"))]
-pub use crate::std_waiting::StdWaiting;
-
-mod async_waiting;
 mod errors;
-mod std_waiting;
 
 /// A way to synchronize a dynamic number of threads through sleeping.
 ///
@@ -81,7 +74,7 @@ mod std_waiting;
 ///
 /// handle.join().unwrap();
 /// ```
-#[derive(Debug, Clone, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq)]
 pub struct EventSync {
   start_time: SystemTime,
   tickrate: u32,
