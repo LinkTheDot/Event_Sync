@@ -1,7 +1,7 @@
 /// All errors that can be returned when using this crate.
 #[derive(Debug, Eq, PartialEq)]
 pub enum TimeError {
-  /// This error is returned when the system clock has been rolled back to before the clock started.
+  /// This error is returned when the system clock has been rolled back to before the EventSync started.
   TimeHasReversed,
 
   /// This error is returned when the [`wait_until()`](crate::EventSync::wait_until) method has been

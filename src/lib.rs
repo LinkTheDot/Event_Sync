@@ -10,7 +10,7 @@ mod errors;
 /// This is achieved through cloning and passing around an instance of EventSync to other threads.
 ///
 /// EventSync can be used if you want events between threads to happen at close to the same time.
-/// It can also be used if you want to regulate the time in which events occurr.
+/// It can also be used if you want to regulate the time in which events occur.
 ///
 /// # Usage
 ///
@@ -86,16 +86,61 @@ impl EventSync {
   /// Takes the duration of a tick as milliseconds.
   /// If 0 is passed in, 1 will be the assigned tickrate for this instance of EventSync.
   pub fn new(tickrate_in_milliseconds: u32) -> Self {
-    let tickrate = if tickrate_in_milliseconds > 0 {
-      tickrate_in_milliseconds
-    } else {
-      1
-    };
+    Self::new_event_sync(tickrate_in_milliseconds, SystemTime::now())
+  }
 
+  /// Creates a new instance of [`EventSync`](EventSync) with the given starting time.
+  ///
+  /// # Example
+  ///
+  /// ```
+  /// use event_sync::*;
+  /// use std::time::Duration;
+  ///
+  /// let tickrate = 10; // 10ms between every tick.
+  /// let starting_time = Duration::from_millis(30); // Start 30ms ahead.
+  /// let event_sync = EventSync::from_starting_time(tickrate, starting_time);
+  ///
+  /// assert_eq!(event_sync.ticks_since_started().unwrap(), 3);
+  /// ```
+  pub fn from_starting_time(tickrate_in_milliseconds: u32, starting_time: Duration) -> Self {
+    let starting_time = SystemTime::now() - starting_time;
+
+    Self::new_event_sync(tickrate_in_milliseconds, starting_time)
+  }
+
+  /// Creates a new instance of [`EventSync`](EventSync) with the given starting tick.
+  ///
+  /// # Example
+  ///
+  /// ```
+  /// use event_sync::*;
+  /// use std::time::Duration;
+  ///
+  /// let tickrate = 10; // 10ms between every tick.
+  /// let starting_tick = 3; // Start 3 ticks ahead.
+  /// let event_sync = EventSync::from_starting_tick(tickrate, starting_tick);
+  ///
+  /// assert_eq!(event_sync.ticks_since_started().unwrap(), 3);
+  /// ```
+  pub fn from_starting_tick(tickrate_in_milliseconds: u32, starting_tick: u32) -> Self {
+    let starting_time = Duration::from_millis((starting_tick * tickrate_in_milliseconds).into());
+    let starting_time = SystemTime::now() - starting_time;
+
+    Self::new_event_sync(tickrate_in_milliseconds, starting_time)
+  }
+
+  /// Create a new [`EventSync`](EventSync) from the given tickrate and system time.
+  fn new_event_sync(tickrate: u32, start_time: SystemTime) -> Self {
     Self {
-      start_time: SystemTime::now(),
-      tickrate,
+      start_time,
+      tickrate: tickrate.max(1),
     }
+  }
+
+  /// Restarts the starting time.
+  pub fn restart(&mut self) {
+    self.start_time = SystemTime::now()
   }
 
   /// Waits until an absolute tick has occurred since EventSync creation.
@@ -237,13 +282,31 @@ impl EventSync {
     ))
   }
 
-  /// Returns the amount of time until the next tick will occurr.
+  /// Returns the amount of time until the next tick will occur.
   ///
   /// # Errors
   ///
   /// - An error is returned when the system time has been reversed to before this EventSync was created.
   pub fn time_until_next_tick(&self) -> Result<std::time::Duration, TimeError> {
     Ok(Duration::from_millis(self.tickrate as u64).saturating_sub(self.time_since_last_tick()?))
+  }
+}
+
+impl std::fmt::Debug for EventSync {
+  fn fmt(
+    &self,
+    formatter: &mut std::fmt::Formatter<'_>,
+  ) -> std::result::Result<(), std::fmt::Error> {
+    write!(formatter, "{:?}", self.time_since_started())
+  }
+}
+
+impl std::fmt::Display for EventSync {
+  fn fmt(
+    &self,
+    formatter: &mut std::fmt::Formatter<'_>,
+  ) -> std::result::Result<(), std::fmt::Error> {
+    write!(formatter, "{:?}", self)
   }
 }
 
@@ -346,5 +409,32 @@ mod tests {
       time_since_last_tick.as_millis(),
       (TEST_TICKRATE as u128 - extra_wait_time)
     );
+  }
+
+  mod from_start_logic {
+    use super::*;
+
+    const STARTING_TICKS: u32 = 10;
+
+    #[test]
+    fn from_ticks() {
+      let event_sync = EventSync::from_starting_tick(TEST_TICKRATE, STARTING_TICKS);
+
+      assert_eq!(
+        event_sync.ticks_since_started().unwrap(),
+        STARTING_TICKS.into()
+      );
+    }
+
+    #[test]
+    fn from_time() {
+      let starting_time = Duration::from_millis((STARTING_TICKS * TEST_TICKRATE).into());
+      let event_sync = EventSync::from_starting_time(TEST_TICKRATE, starting_time);
+
+      assert_eq!(
+        event_sync.ticks_since_started().unwrap(),
+        STARTING_TICKS.into()
+      );
+    }
   }
 }
