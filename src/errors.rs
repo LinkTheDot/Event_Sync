@@ -1,4 +1,4 @@
-use std::{fmt::Display, time::SystemTimeError};
+use std::time::SystemTimeError;
 use thiserror::Error;
 
 /// All errors that can be returned when using this crate.
