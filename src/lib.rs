@@ -14,10 +14,10 @@ mod errors;
 ///
 /// # Usage
 ///
-/// In order to use eventsync you start by creating one with [`EventSync::new()`](EventSync::new).
-/// You then pass in the desired tickrate for the EventSync to use for how long a tick should last.
+/// In order to use EventSync, you start by creating one with [`EventSync::new()`](EventSync::new).
+/// You then pass in the desired tickrate for the EventSync to know how long 1 tick should last.
 ///
-/// The tickrate will be an integer in milliseconds, and cannot go below 1.
+/// The tickrate will be an integer reflected as milliseconds, and cannot go below 1.
 /// If you pass in 0, 1 millisecond will be set as the tickrate.
 ///
 /// ```
@@ -251,11 +251,7 @@ impl EventSync {
   ///
   /// - An error is returned when the system time has been reversed to before this EventSync was created.
   pub fn time_since_started(&self) -> Result<std::time::Duration, TimeError> {
-    self
-      .start_time
-      .elapsed()
-      .ok()
-      .ok_or(TimeError::TimeHasReversed)
+    self.start_time.elapsed().map_err(Into::into)
   }
 
   /// Returns the amount of ticks that have occurred since the creation of this instance of EventSync.
@@ -276,10 +272,7 @@ impl EventSync {
   ///
   /// - An error is returned when the system time has been reversed to before this EventSync was created.
   pub fn ticks_since_started(&self) -> Result<u64, TimeError> {
-    match self.start_time.elapsed() {
-      Ok(time_since_started) => Ok(time_since_started.as_millis() as u64 / self.tickrate as u64),
-      Err(_) => Err(TimeError::TimeHasReversed),
-    }
+    Ok(self.start_time.elapsed()?.as_millis() as u64 / self.tickrate as u64)
   }
 
   /// Returns the amount of time that has passed since the last tick
