@@ -4,7 +4,7 @@ license = "MIT"
 authors = ["Link <CirnoStrongest9909@hotmail.com>"]
 readme = "README.md"
 repository = "https://github.com/LinkTheDot/Event_Sync"
-version = "0.1.5"
+version = "0.1.6"
 edition = "2021"
 description = "A crate that can be used to synchronize events to only occur between fixed gaps of time."
 
