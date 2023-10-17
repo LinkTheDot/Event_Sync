@@ -420,11 +420,13 @@ mod tests {
 
     std::thread::sleep(Duration::from_millis(extra_wait_time as u64));
 
-    let time_since_last_tick = event_sync.time_until_next_tick().unwrap();
+    let time_until_next_tick =
+      (event_sync.time_until_next_tick().unwrap().as_micros() as f64 / 1000.0).ceil();
 
+    println!("{:?}", time_until_next_tick);
     assert_eq!(
-      time_since_last_tick.as_millis(),
-      (TEST_TICKRATE as u128 - extra_wait_time)
+      time_until_next_tick as u64,
+      (TEST_TICKRATE - extra_wait_time) as u64
     );
   }
 
