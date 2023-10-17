@@ -18,3 +18,5 @@ impl PartialEq for TimeError {
     std::mem::discriminant(self) == std::mem::discriminant(other)
   }
 }
+
+impl Eq for TimeError {}

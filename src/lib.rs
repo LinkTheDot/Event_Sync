@@ -281,8 +281,8 @@ impl EventSync {
   ///
   /// - An error is returned when the system time has been reversed to before this EventSync was created.
   pub fn time_since_last_tick(&self) -> Result<std::time::Duration, TimeError> {
-    Ok(Duration::from_millis(
-      (self.time_since_started()?.as_millis() % self.tickrate as u128) as u64,
+    Ok(Duration::from_nanos(
+      (self.time_since_started()?.as_nanos() % (self.tickrate as u128 * 1000000)) as u64,
     ))
   }
 
@@ -386,6 +386,19 @@ mod tests {
 
   #[test]
   fn time_since_last_tick_logic() {
+    let tickrate = 1;
+    let event_sync = EventSync::new(tickrate);
+
+    event_sync.wait_for_tick();
+
+    let time_since_last_tick = event_sync.time_since_last_tick().unwrap();
+
+    assert!((tickrate as u128 * 1000000) > time_since_last_tick.as_nanos());
+    assert_ne!(time_since_last_tick.as_nanos(), 0);
+  }
+
+  #[test]
+  fn time_since_last_tick_accuracy() {
     let event_sync = EventSync::new(TEST_TICKRATE);
     let extra_wait_time = 2;
 
@@ -440,5 +453,16 @@ mod tests {
         STARTING_TICKS.into()
       );
     }
+  }
+
+  #[test]
+  fn anyhow_compatibility() {
+    fn return_anyhow_error() -> anyhow::Result<()> {
+      Err(TimeError::ThatTimeHasAlreadyHappened)?;
+
+      Ok(())
+    }
+
+    let _ = return_anyhow_error();
   }
 }
