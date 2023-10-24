@@ -1,6 +1,7 @@
 #![doc = include_str!("../README.md")]
 
 use crate::errors::TimeError;
+use serde::{Deserialize, Serialize, Serializer};
 use std::time::{Duration, SystemTime};
 
 mod errors;
@@ -74,18 +75,82 @@ mod errors;
 ///
 /// handle.join().unwrap();
 /// ```
-#[derive(Clone, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
 pub struct EventSync {
   start_time: SystemTime,
   tickrate: u32,
+  #[serde(serialize_with = "pause")]
   paused_time: Option<SystemTime>,
 }
 
+fn pause<S>(value: &Option<SystemTime>, serializer: S) -> Result<S::Ok, S::Error>
+where
+  S: Serializer,
+{
+  value.unwrap_or(SystemTime::now()).serialize(serializer)
+}
+
 impl EventSync {
-  /// Creates a new instance of EventSync.
+  /// Creates a new instance of [`EventSync`](EventSync).
   ///
   /// Takes the duration of a tick as milliseconds.
   /// If 0 is passed in, 1 will be the assigned tickrate for this instance of EventSync.
+  ///
+  /// # Examples
+  ///
+  /// ```
+  /// use event_sync::*;
+  ///
+  /// let tickrate = 10; // 10ms between every tick
+  ///
+  /// // Create an event synchronizer with a 10ms tickrate.
+  /// let event_sync = EventSync::new(tickrate);
+  /// ```
+  ///
+  /// You can then use this EventSync for both time tracking and synchronizing threads.
+  ///
+  /// # Time Tracking
+  /// ```
+  /// use event_sync::*;
+  /// use std::time::Instant;
+  ///
+  /// let tickrate = 10; // 10ms between every tick
+  /// let event_sync = EventSync::new(tickrate as u32);
+  ///
+  /// let start = Instant::now();
+  ///
+  /// // Wait for 5 ticks (5 * 10)ms.
+  /// event_sync.wait_for_x_ticks(5);
+  ///
+  /// let finish = start.elapsed().as_millis();
+  ///
+  /// // Check that the time it took for the operation was (waited_ticks * tickrate)ms
+  /// assert_eq!(finish, tickrate * 5);
+  /// ```
+  ///
+  /// # Thread Synchronization
+  /// ```
+  /// use event_sync::*;
+  /// use std::thread;
+  ///
+  /// let tickrate = 10; // 10ms between every tick
+  /// let event_sync = EventSync::new(tickrate);
+  ///
+  /// let passed_event_sync = event_sync.clone();
+  ///
+  /// let handle = thread::spawn(move || {
+  ///   // waiting until 5 ticks have occurred since the creation of event_sync.
+  ///   passed_event_sync.wait_until(5);
+  ///
+  ///   // do something
+  /// });
+  ///
+  /// // waiting until 5 ticks have occurred since the creation of event_sync.
+  /// event_sync.wait_until(5);
+  ///
+  /// // do something
+  ///
+  /// handle.join().unwrap();
   pub fn new(tickrate_in_milliseconds: u32) -> Self {
     Self::new_event_sync(tickrate_in_milliseconds, SystemTime::now(), false)
   }
@@ -146,6 +211,28 @@ impl EventSync {
   /// If 10.1 seconds have passed, that time will be retained after paused.
   ///
   /// Calling pause when already paused does nothing.
+  ///
+  /// # Warning
+  ///
+  /// If the system time was reversed to before EventSync start time before calling pause, the EventSync cannot be unpaused.
+  ///
+  /// # Examples
+  ///
+  /// ```
+  /// use event_sync::EventSync;
+  ///
+  /// let tickrate = 10; // 10ms between every tick
+  /// let mut event_sync = EventSync::new(tickrate);
+  /// let other_event_sync = event_sync.clone(); // Create a second one to desync.
+  ///
+  /// event_sync.wait_for_tick().unwrap(); // Add some time.
+  /// event_sync.pause();
+  ///
+  /// other_event_sync.wait_for_tick().unwrap(); // Desync from the paused EventSync.
+  ///
+  /// event_sync.unpause().unwrap();
+  /// assert_eq!(event_sync.ticks_since_started(), Ok(1)); // Only 1 tick has passed while this EventSync wasn't paused.
+  /// ```
   pub fn pause(&mut self) {
     if self.paused_time.is_none() {
       self.paused_time = Some(SystemTime::now());
@@ -155,11 +242,29 @@ impl EventSync {
   /// Unpauses this instance of EventSync if it's been paused.
   /// If the time passed before pausing was 10.1 seconds, that time will be retained when unpaused.
   ///
-  /// Calling unpause when the EventSync is already running, nothing happens.
+  /// Calling unpause when the EventSync is already running does nothing.
   ///
   /// # Errors
   ///
-  /// - An error is returned if the system time was reversed to before EventSync start time before calling pause.
+  /// - An error is returned if the system time was reversed to before EventSync start time before calling [`pause`](EventSync::pause).
+  ///
+  /// # Examples
+  ///
+  /// ```
+  /// use event_sync::EventSync;
+  ///
+  /// let tickrate = 10; // 10ms between every tick
+  /// let mut event_sync = EventSync::new(tickrate);
+  /// let other_event_sync = event_sync.clone(); // Create a second one to desync.
+  ///
+  /// event_sync.wait_for_tick().unwrap(); // Add some time.
+  /// event_sync.pause();
+  ///
+  /// other_event_sync.wait_for_tick().unwrap(); // Desync from the paused EventSync.
+  ///
+  /// event_sync.unpause().unwrap();
+  /// assert_eq!(event_sync.ticks_since_started(), Ok(1)); // Only 1 tick has passed while this EventSync wasn't paused.
+  /// ```
   pub fn unpause(&mut self) -> Result<(), TimeError> {
     let Some(paused_time) = self.paused_time else {
       return Ok(());
@@ -175,6 +280,19 @@ impl EventSync {
   ///
   /// Call [`event_sync.unpause()`](EventSync::unpause) to unpause the eventsync.
   /// The time that's passed before pausing is retained.
+  ///
+  /// # Examples
+  ///
+  /// ```
+  /// use event_sync::EventSync;
+  ///
+  /// let tickrate = 10; // 10ms between every tick
+  /// let mut event_sync = EventSync::new(tickrate);
+  ///
+  /// event_sync.pause();
+  ///
+  /// assert!(event_sync.is_paused());
+  /// ```
   pub fn is_paused(&self) -> bool {
     self.paused_time.is_some()
   }
@@ -194,6 +312,20 @@ impl EventSync {
   /// Any other instances tied to this one will not be reset.
   ///
   /// Unpauses if paused, resetting the time.
+  ///
+  /// # Examples
+  /// ```
+  /// use event_sync::EventSync;
+  ///
+  /// let tickrate = 10; // 10ms between every tick
+  /// let mut event_sync = EventSync::new(tickrate);
+  ///
+  /// event_sync.wait_for_tick().unwrap(); // Add some time.
+  ///
+  /// event_sync.restart(); // Restart the EventSync.
+  ///
+  /// assert_eq!(event_sync.ticks_since_started(), Ok(0)); // 0 ticks is returned because the EventSync was restarted.
+  /// ```
   pub fn restart(&mut self) {
     self.start_time = SystemTime::now();
     self.paused_time = None;
@@ -368,6 +500,19 @@ impl EventSync {
   ///
   /// - An error is returned if the EventSync is paused.
   /// - An error is returned when the system time has been reversed to before this EventSync was created.
+  ///
+  /// # Examples
+  ///
+  /// ```
+  /// use event_sync::EventSync;
+  ///
+  /// let tickrate = 10; // 10ms between every tick.
+  /// let event_sync = EventSync::new(tickrate);
+  ///
+  /// event_sync.wait_for_tick().unwrap();
+  ///
+  /// assert!(event_sync.time_since_last_tick().unwrap().as_micros() < 500); // Practically no time should have passed since the last tick.
+  /// ```
   pub fn time_since_last_tick(&self) -> Result<std::time::Duration, TimeError> {
     self.err_if_paused()?;
 
@@ -382,6 +527,19 @@ impl EventSync {
   ///
   /// - An error is returned if the EventSync is paused.
   /// - An error is returned when the system time has been reversed to before this EventSync was created.
+  ///
+  /// # Examples
+  ///
+  /// ```
+  /// use event_sync::EventSync;
+  ///
+  /// let tickrate = 10; // 10ms between every tick.
+  /// let event_sync = EventSync::new(tickrate);
+  ///
+  /// event_sync.wait_for_tick().unwrap();
+  ///
+  /// assert!(event_sync.time_until_next_tick().unwrap().as_micros() > 500); // Practically no time should have passed since the last tick.
+  /// ```
   pub fn time_until_next_tick(&self) -> Result<std::time::Duration, TimeError> {
     self.err_if_paused()?;
 
@@ -537,7 +695,7 @@ mod tests {
 
       assert_eq!(
         event_sync.ticks_since_started().unwrap(),
-        STARTING_TICKS.into()
+        STARTING_TICKS as u64
       );
     }
 
@@ -548,7 +706,7 @@ mod tests {
 
       assert_eq!(
         event_sync.ticks_since_started().unwrap(),
-        STARTING_TICKS.into()
+        STARTING_TICKS as u64
       );
     }
   }
@@ -630,6 +788,51 @@ mod tests {
 
       assert_eq!(event_sync.ticks_since_started(), Ok(2));
       assert!(!event_sync.is_paused());
+    }
+  }
+
+  #[cfg(test)]
+  mod serde_implementation_logic {
+    use super::*;
+
+    #[test]
+    fn serialize_pauses() {
+      let event_sync = EventSync::new(TEST_TICKRATE);
+      let other_event_sync = event_sync.clone();
+
+      event_sync.wait_for_tick().unwrap();
+
+      let serialized_event_sync = serde_json::to_string(&event_sync).unwrap();
+
+      other_event_sync.wait_for_tick().unwrap();
+
+      let mut deserialized_event_sync =
+        serde_json::from_str::<EventSync>(&serialized_event_sync).unwrap();
+
+      assert!(deserialized_event_sync.is_paused());
+
+      deserialized_event_sync.unpause().unwrap();
+
+      assert_eq!(deserialized_event_sync.ticks_since_started(), Ok(1));
+    }
+
+    #[test]
+    fn serialize_doesnt_overwrite_existing_pause_value() {
+      let mut event_sync = EventSync::new(TEST_TICKRATE);
+
+      event_sync.wait_for_tick().unwrap();
+      event_sync.pause();
+
+      let serialized_event_sync = serde_json::to_string(&event_sync).unwrap();
+
+      let mut deserialized_event_sync =
+        serde_json::from_str::<EventSync>(&serialized_event_sync).unwrap();
+
+      assert!(deserialized_event_sync.is_paused());
+
+      deserialized_event_sync.unpause().unwrap();
+
+      assert_eq!(deserialized_event_sync.ticks_since_started(), Ok(1));
     }
   }
 
