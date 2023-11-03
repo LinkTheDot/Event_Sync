@@ -8,17 +8,17 @@ const TICKRATE: u32 = 500;
 
 fn main() {
   // Create the EventSync with 500ms tickrate.
-  let old_event_sync = EventSync::new(TICKRATE);
+  let event_sync = EventSync::new(TICKRATE);
 
   // Add some time from creation.
-  old_event_sync.wait_for_x_ticks(2).unwrap();
+  event_sync.wait_for_x_ticks(2).unwrap();
 
   // Store the EventSync.
   // This will pause it ensuring that only 2 ticks will have passed once we deserialize.
-  let serialized_event_sync = serde_json::to_string(&old_event_sync).unwrap();
+  let serialized_event_sync = serde_json::to_string(&event_sync).unwrap();
 
   // Desynchronize the stored and still live EventSync.
-  old_event_sync.wait_for_tick().unwrap();
+  event_sync.wait_for_tick().unwrap();
 
   // Deserialize the stored EventSync.
   let mut deserialized_event_sync =
