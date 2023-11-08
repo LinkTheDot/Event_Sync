@@ -780,6 +780,12 @@ impl std::fmt::Display for EventSync {
   }
 }
 
+impl Default for EventSync {
+  fn default() -> Self {
+    Self::new(10)
+  }
+}
+
 // Tests have a chance to fail due to their time sensitive nature.
 #[cfg(test)]
 mod tests {
