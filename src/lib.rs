@@ -1,14 +1,16 @@
 #![doc = include_str!("../README.md")]
-// Fully inplement Serialize and Deserialize, aka make sure it doesn't break.
 
 use crate::errors::TimeError;
-use serde::{Deserialize, Serialize, Serializer};
+use inner::*;
+use serde::{Deserialize, Serialize};
+use std::marker::PhantomData;
 use std::{
   sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard},
   time::{Duration, SystemTime},
 };
 
 mod errors;
+mod inner;
 
 /// A way to synchronize a dynamic number of threads through sleeping.
 /// Achieved through cloning and passing around an instance of EventSync to other threads.
@@ -79,58 +81,267 @@ mod errors;
 ///
 /// handle.join().unwrap();
 /// ```
+///
+/// # Permissions
+///
+/// Of course, you don't want just anyone to be able to change whatever they want on an EventSync.
+/// To prevent that you can clone an event sync with an Immutable tag.
+///
+/// By calling [`event_sync.clone_immutable()`](EventSync::clone_immutable), you create a copy of the EventSync
+/// that cannot call any methods requiring &mut self.
+///
+/// # Example
+/// ```
+/// use event_sync::*;
+///
+/// let tickrate = 10;
+/// let event_sync = EventSync::new(tickrate);
+///
+/// let immutable_event_sync = event_sync.clone_immutable(); // Create an immutable EventSync.
+///
+/// assert_eq!(immutable_event_sync.get_tickrate(), tickrate);
+/// ```
+///
+/// The type for this Immutable EventSync would look like this:
+/// ```
+/// use event_sync::{EventSync, Immutable};
+///
+/// struct TimeKeeper {
+///   event_sync: EventSync<Immutable>,
+/// }
+/// ```
 #[derive(Clone, Serialize, Deserialize)]
-pub struct EventSync {
+pub struct EventSync<Access = Mutable> {
   inner: Arc<RwLock<InnerEventSync>>,
+  change_access: PhantomData<Access>,
 }
 
-/// The internal data for EventSync for threadsafe sharing of this value.
-#[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
-struct InnerEventSync {
-  start_time: SystemTime,
-  tickrate: u32,
-  #[serde(serialize_with = "pause")]
-  paused_time: Option<SystemTime>,
-}
+/// A state for an EventSync to prevent methods with &mut from being called.
+#[derive(Clone, Serialize, Deserialize)]
+pub struct Immutable;
+/// A state for an EventSync to give access to all methods.
+#[derive(Clone, Serialize, Deserialize)]
+pub struct Mutable;
 
-/// Sets the paused_time field when InnerEventSync is serialized.
-fn pause<S>(value: &Option<SystemTime>, serializer: S) -> Result<S::Ok, S::Error>
-where
-  S: Serializer,
-{
-  value.unwrap_or(SystemTime::now()).serialize(serializer)
-}
-
-impl InnerEventSync {
-  /// Creates an instance of InnerEventSync with SystemTime::now() - starting_time.
-  /// Essentially starting with an already determined amount of time passed.
-  fn from_starting_time(tickrate_in_milliseconds: u32, starting_time: Duration) -> Self {
-    let starting_time = SystemTime::now() - starting_time;
-
-    Self::new(tickrate_in_milliseconds, starting_time, false)
-  }
-
-  // Not used at the moment, but the code will be kept here for if it's ever needed.
-  // fn from_starting_tick(tickrate_in_milliseconds: u32, starting_tick: u32) -> Self {
-  //   let starting_time = Duration::from_millis((starting_tick * tickrate_in_milliseconds).into());
-  //   let starting_time = SystemTime::now() - starting_time;
-  //
-  //   Self::new(tickrate_in_milliseconds, starting_time, false)
-  // }
-
-  /// Creates an instance of InnerEventSync with the given tickrate, starting time, and whether or not it starts paused.
+impl<T> EventSync<T> {
+  /// Returns true if this instance of EventSyunc has been paused.
   ///
-  /// The paused time given is SystemTime::now().
-  fn new(tickrate: u32, start_time: SystemTime, is_paused: bool) -> Self {
-    Self {
-      start_time,
-      tickrate: tickrate.max(1),
-      paused_time: is_paused.then_some(SystemTime::now()),
-    }
+  /// Call [`event_sync.unpause()`](EventSync::unpause) to unpause the eventsync.
+  /// The time that's passed before pausing is retained.
+  ///
+  /// # Examples
+  ///
+  /// ```
+  /// use event_sync::EventSync;
+  ///
+  /// let tickrate = 10; // 10ms between every tick
+  /// let mut event_sync = EventSync::new(tickrate);
+  ///
+  /// event_sync.pause();
+  ///
+  /// assert!(event_sync.is_paused());
+  /// ```
+  pub fn is_paused(&self) -> bool {
+    self.read_inner().is_paused()
+  }
+
+  /// Returns the internal tickrate.
+  ///
+  /// # Examples
+  ///
+  /// ```
+  /// use event_sync::*;
+  ///
+  /// let tickrate = 10; // 10ms tickrate.
+  /// let event_sync = EventSync::new(tickrate);
+  /// let other_event_sync = event_sync.clone();
+  ///
+  /// assert_eq!(event_sync.get_tickrate(), tickrate);
+  /// assert_eq!(other_event_sync.get_tickrate(), tickrate);
+  /// ```
+  pub fn get_tickrate(&self) -> u32 {
+    self.read_inner().get_tickrate()
+  }
+
+  /// Waits until an absolute tick has occurred since EventSync creation.
+  ///
+  /// That means, if you created an instance of EventSync with a tickrate of 10ms,
+  /// and you want to wait until 1 second has passed since creation.
+  /// You would wait until the 100th tick, as 100 ticks would be 1 second since EventSync Creation.
+  ///
+  /// # Errors
+  ///
+  /// - An error is returned when the system time has been reversed before this EventSync was created.
+  /// - An error is returned when the given time to wait for has already occurred.
+  /// - An error is returned if the EventSync is paused.
+  ///
+  /// # Usage
+  ///
+  /// ```
+  /// use event_sync::EventSync;
+  ///
+  /// let tickrate = 10; // 10ms between every tick
+  /// let event_sync = EventSync::new(tickrate);
+  ///
+  /// // Wait 1 second from the creation of event_sync.
+  /// event_sync.wait_until(100).unwrap();
+  /// ```
+  pub fn wait_until(&self, tick_to_wait_for: u64) -> Result<(), TimeError> {
+    self.read_inner().wait_until(tick_to_wait_for)
+  }
+
+  /// Waits until the next tick relative to where now is between ticks.
+  ///
+  /// Let's say the tickrate is 10ms, and the last tick was 5ms ago.
+  /// This method would sleep for 5ms to get to the next tick.
+  ///
+  /// # Errors
+  ///
+  /// - An error is returned when the system time has been reversed before this EventSync was created.
+  /// - An error is returned when the given time to wait for has already occurred.
+  /// - An error is returned if the EventSync is paused.
+  ///
+  /// # Usage
+  /// ```
+  /// use event_sync::EventSync;
+  ///
+  /// let tickrate = 10; // 10ms between every tick
+  /// let event_sync = EventSync::new(tickrate);
+  ///
+  /// // wait until the next tick
+  /// event_sync.wait_for_tick();
+  /// ```
+  pub fn wait_for_tick(&self) -> Result<(), TimeError> {
+    self.read_inner().wait_for_tick()
+  }
+
+  /// Waits for the passed in amount of ticks relative to where now is between ticks.
+  ///
+  /// Let's say the tickrate is 10ms, and the last tick was 5ms ago.
+  /// If you wanted to wait for 3 ticks, this method would sleep for 25ms, as that would be 3 ticks from now.
+  ///
+  /// # Errors
+  ///
+  /// - An error is returned when the system time has been reversed before this EventSync was created.
+  /// - An error is returned when the given time to wait for has already occurred.
+  /// - An error is returned if the EventSync is paused.
+  ///
+  /// # Usage
+  /// ```
+  /// use event_sync::EventSync;
+  ///
+  /// let tickrate = 10; // 10ms between every tick
+  /// let event_sync = EventSync::new(tickrate);
+  ///
+  /// // wait for 3 ticks
+  /// event_sync.wait_for_x_ticks(3);
+  /// ```
+  pub fn wait_for_x_ticks(&self, ticks_to_wait: u32) -> Result<(), TimeError> {
+    self.read_inner().wait_for_x_ticks(ticks_to_wait)
+  }
+
+  /// Returns the amount of time that has occurred since the creation of this instance of EventSync.
+  ///
+  /// # Errors
+  ///
+  /// - An error is returned if the EventSync is paused.
+  /// - An error is returned when the system time has been reversed to before this EventSync was created.
+  ///
+  /// # Usage
+  /// ```
+  /// use event_sync::*;
+  /// use std::time::Duration;
+  ///
+  /// let tickrate = 10; // 10ms between every tick
+  /// let event_sync = EventSync::new(tickrate);
+  ///
+  /// // Wait until 5 ticks have occurred since EventSync creation.
+  /// event_sync.wait_until(5);
+  ///
+  /// let milliseconds_since_started = event_sync.time_since_started().unwrap().as_millis();
+  ///
+  /// assert_eq!(milliseconds_since_started, 50);
+  /// ```
+  pub fn time_since_started(&self) -> Result<std::time::Duration, TimeError> {
+    self.read_inner().time_since_started()
+  }
+
+  /// Returns the amount of ticks that have occurred since the creation of this instance of EventSync.
+  ///
+  /// # Errors
+  ///
+  /// - An error is returned if the EventSync is paused.
+  /// - An error is returned when the system time has been reversed to before this EventSync was created.
+  ///
+  /// # Usage
+  ///
+  /// ```
+  /// use event_sync::*;
+  ///
+  /// let tickrate = 10; // 10ms between every tick
+  /// let event_sync = EventSync::new(tickrate);
+  ///
+  /// event_sync.wait_until(5);
+  ///
+  /// assert_eq!(event_sync.ticks_since_started(), Ok(5));
+  /// ```
+  pub fn ticks_since_started(&self) -> Result<u64, TimeError> {
+    self.read_inner().ticks_since_started()
+  }
+
+  /// Returns the amount of time that has passed since the last tick
+  ///
+  /// # Errors
+  ///
+  /// - An error is returned if the EventSync is paused.
+  /// - An error is returned when the system time has been reversed to before this EventSync was created.
+  ///
+  /// # Examples
+  ///
+  /// ```
+  /// use event_sync::EventSync;
+  ///
+  /// let tickrate = 10; // 10ms between every tick.
+  /// let event_sync = EventSync::new(tickrate);
+  ///
+  /// event_sync.wait_for_tick().unwrap();
+  ///
+  /// assert!(event_sync.time_since_last_tick().unwrap().as_micros() < 500); // Practically no time should have passed since the last tick.
+  /// ```
+  pub fn time_since_last_tick(&self) -> Result<std::time::Duration, TimeError> {
+    self.read_inner().time_since_last_tick()
+  }
+
+  /// Returns the amount of time until the next tick will occur.
+  ///
+  /// # Errors
+  ///
+  /// - An error is returned if the EventSync is paused.
+  /// - An error is returned when the system time has been reversed to before this EventSync was created.
+  ///
+  /// # Examples
+  ///
+  /// ```
+  /// use event_sync::EventSync;
+  ///
+  /// let tickrate = 10; // 10ms between every tick.
+  /// let event_sync = EventSync::new(tickrate);
+  ///
+  /// event_sync.wait_for_tick().unwrap();
+  ///
+  /// assert!(event_sync.time_until_next_tick().unwrap().as_micros() > 500); // Practically no time should have passed since the last tick.
+  /// ```
+  pub fn time_until_next_tick(&self) -> Result<std::time::Duration, TimeError> {
+    self.read_inner().time_until_next_tick()
+  }
+
+  /// Obtains a ReadGuard of the [`internal EventSync data`](InnerEventSync).
+  fn read_inner(&self) -> RwLockReadGuard<InnerEventSync> {
+    self.inner.read().unwrap()
   }
 }
 
-impl EventSync {
+impl EventSync<Mutable> {
   /// Creates a new instance of [`EventSync`](EventSync).
   ///
   /// Takes the duration of a tick as milliseconds.
@@ -305,59 +516,113 @@ impl EventSync {
 
     Self {
       inner: Arc::new(RwLock::new(inner)),
+      change_access: PhantomData,
     }
   }
 
-  /// Pauses this instance of EventSync.
-  /// Any EventSync that was cloned off this one is also paused, as they are all connected.
+  /// This creates an Immutable instance of [`EventSync`](EventSync).
   ///
-  /// When paused, the time that passed is retained.
-  /// If 10.1 seconds have passed, that time will be retained after paused.
+  /// This version of EventSync cannot change any of the underlying data, only being able to use/read the data.
+  /// Methods such a waiting for a certain tick are fine, however pausing, unpausing, changing tickrate, etc. are not possible through an Immutable EventSync.
   ///
-  /// Calling pause when already paused does nothing.
+  /// Additionally, Immutable [`EventSync`](EventSync) can only create other Immutable instances of itself.
+  pub fn clone_immutable(&self) -> EventSync<Immutable> {
+    EventSync {
+      inner: self.inner.clone(),
+      change_access: PhantomData,
+    }
+  }
+
+  /// Obtains a WriteGuard of the [`internal EventSync data`](InnerEventSync).
+  fn write_inner(&mut self) -> RwLockWriteGuard<InnerEventSync> {
+    self.inner.write().unwrap()
+  }
+
+  /// Restarts the starting time.
+  /// This will also restart the time for every EventSync cloned off of this one.
   ///
-  /// # Warning
-  ///
-  /// If the system time was reversed to before EventSync start time before calling pause, the EventSync cannot be unpaused, and will return an error.
+  /// Unpauses if paused, resetting the time.
   ///
   /// # Examples
-  ///
   /// ```
   /// use event_sync::EventSync;
   ///
   /// let tickrate = 10; // 10ms between every tick
   /// let mut event_sync = EventSync::new(tickrate);
-  /// let other_event_sync = EventSync::new(tickrate); // Create a second one to desync.
   ///
   /// event_sync.wait_for_tick().unwrap(); // Add some time.
-  /// event_sync.pause();
   ///
-  /// other_event_sync.wait_for_tick().unwrap(); // Desync from the paused EventSync.
+  /// event_sync.restart(); // Restart the EventSync.
   ///
-  /// event_sync.unpause().unwrap();
-  /// assert_eq!(event_sync.ticks_since_started(), Ok(1)); // Only 1 tick has passed while this EventSync wasn't paused.
+  /// assert_eq!(event_sync.ticks_since_started(), Ok(0)); // 0 ticks is returned because the EventSync was restarted.
+  /// ```
+  pub fn restart(&mut self) {
+    self.write_inner().restart();
+  }
+
+  /// Restarts the startimg time, and changes self to paused.
+  /// This will also restart and pause the time for every EventSync cloned off of this one.
+  ///
+  /// # Examples
+  /// ```
+  /// use event_sync::EventSync;
+  ///
+  /// let tickrate = 10; // 10ms between every tick
+  /// let mut event_sync = EventSync::new(tickrate);
+  ///
+  /// event_sync.wait_for_tick().unwrap(); // Add some time.
+  ///
+  /// event_sync.restart_paused(); // Restart the EventSync.
+  ///
+  /// assert!(event_sync.ticks_since_started().is_err());
+  /// ```
+  pub fn restart_paused(&mut self) {
+    self.write_inner().restart_paused();
+  }
+
+  /// Changes how long a tick lasts internally. Retains the time that passed before method call.
+  /// That means if 100ms have passed, 100ms will still have passed. The amount of ticks will be the
+  /// only thing that's changed.
+  ///
+  /// Changes the tickrate for all connected EventSyncs.
+  ///
+  /// # Examples
+  ///
+  /// ```
+  /// use event_sync::*;
+  ///
+  /// let tickrate = 10; // 10ms tickrate.
+  /// let mut event_sync = EventSync::new(tickrate);
+  ///
+  /// // Wait for 100ms (10 ticks).
+  /// event_sync.wait_for_x_ticks(10).unwrap();
+  ///
+  /// // Change the tickrate to 100ms, 10x what it was before.
+  /// event_sync.change_tickrate(tickrate * 10);
+  ///
+  /// // Ensure that 1 tick has passed, which is now 100ms.
+  /// assert_eq!(event_sync.ticks_since_started().unwrap(), 1);
+  /// // Ensure that the tickrate is now 100ms instead of the prior 10ms.
+  /// assert_eq!(event_sync.get_tickrate(), 100);
   /// ```
   ///
   /// # EventSyncs are connected
   ///
   /// ```
-  /// use event_sync::EventSync;
+  /// use event_sync::*;
   ///
-  /// let tickrate = 10; // 10ms between every tick
-  /// let mut event_sync = EventSync::new(tickrate);
-  /// let other_event_sync = event_sync.clone();
+  /// let tickrate = 10; // 10ms tickrate.
+  /// let event_sync = EventSync::new(tickrate);
+  /// let mut other_event_sync = event_sync.clone();
   ///
-  /// event_sync.pause();
+  /// // Change the tickrate. This will change it for both EventSyncs.
+  /// other_event_sync.change_tickrate(tickrate * 2);
   ///
-  /// assert!(other_event_sync.is_paused());
-  ///
+  /// // Ensure the original EventSync's tickrate is also changed.
+  /// assert_eq!(event_sync.get_tickrate(), tickrate * 2);
   /// ```
-  pub fn pause(&mut self) {
-    let mut inner = self.write_inner();
-
-    if inner.paused_time.is_none() {
-      inner.paused_time = Some(SystemTime::now());
-    }
+  pub fn change_tickrate(&mut self, new_tickrate: u32) {
+    self.write_inner().change_tickrate(new_tickrate);
   }
 
   /// Unpauses this instance of EventSync if it's been paused.
@@ -405,22 +670,20 @@ impl EventSync {
   /// assert!(!other_event_sync.is_paused());
   /// ```
   pub fn unpause(&mut self) -> Result<(), TimeError> {
-    let mut inner = self.write_inner();
-
-    let Some(paused_time) = inner.paused_time else {
-      return Ok(());
-    };
-    let time_running = paused_time.duration_since(inner.start_time)?;
-
-    *inner = InnerEventSync::from_starting_time(inner.tickrate, time_running);
-
-    Ok(())
+    self.write_inner().unpause()
   }
 
-  /// Returns true if this instance of EventSyunc has been paused.
+  /// Pauses this instance of EventSync.
+  /// Any EventSync that was cloned off this one is also paused, as they are all connected.
   ///
-  /// Call [`event_sync.unpause()`](EventSync::unpause) to unpause the eventsync.
-  /// The time that's passed before pausing is retained.
+  /// When paused, the time that passed is retained.
+  /// If 10.1 seconds have passed, that time will be retained after paused.
+  ///
+  /// Calling pause when already paused does nothing.
+  ///
+  /// # Warning
+  ///
+  /// If the system time was reversed to before EventSync start time before calling pause, the EventSync cannot be unpaused, and will return an error.
   ///
   /// # Examples
   ///
@@ -429,328 +692,33 @@ impl EventSync {
   ///
   /// let tickrate = 10; // 10ms between every tick
   /// let mut event_sync = EventSync::new(tickrate);
-  ///
-  /// event_sync.pause();
-  ///
-  /// assert!(event_sync.is_paused());
-  /// ```
-  pub fn is_paused(&self) -> bool {
-    self.read_inner().paused_time.is_some()
-  }
-
-  /// A convenience method that will return an error if the event sync is paused.
-  ///
-  /// # Errors
-  ///
-  /// - When self is paused..?
-  fn err_if_paused(&self) -> Result<(), TimeError> {
-    if self.is_paused() {
-      return Err(TimeError::EventSyncPaused);
-    }
-
-    Ok(())
-  }
-
-  /// Restarts the starting time.
-  /// This will also restart the time for every EventSync cloned off of this one.
-  ///
-  /// Unpauses if paused, resetting the time.
-  ///
-  /// # Examples
-  /// ```
-  /// use event_sync::EventSync;
-  ///
-  /// let tickrate = 10; // 10ms between every tick
-  /// let mut event_sync = EventSync::new(tickrate);
+  /// let other_event_sync = EventSync::new(tickrate); // Create a second one to desync.
   ///
   /// event_sync.wait_for_tick().unwrap(); // Add some time.
+  /// event_sync.pause();
   ///
-  /// event_sync.restart(); // Restart the EventSync.
+  /// other_event_sync.wait_for_tick().unwrap(); // Desync from the paused EventSync.
   ///
-  /// assert_eq!(event_sync.ticks_since_started(), Ok(0)); // 0 ticks is returned because the EventSync was restarted.
-  /// ```
-  pub fn restart(&mut self) {
-    let mut inner = self.write_inner();
-
-    inner.start_time = SystemTime::now();
-    inner.paused_time = None;
-  }
-
-  /// Changes how long a tick lasts internally. Retains the time that passed before method call.
-  /// That means if 100ms have passed, 100ms will still have passed. The amount of ticks will be the
-  /// only thing that's changed.
-  ///
-  /// Changes the tickrate for all connected EventSyncs.
-  ///
-  /// # Examples
-  ///
-  /// ```
-  /// use event_sync::*;
-  ///
-  /// let tickrate = 10; // 10ms tickrate.
-  /// let mut event_sync = EventSync::new(tickrate);
-  ///
-  /// // Wait for 100ms (10 ticks).
-  /// event_sync.wait_for_x_ticks(10).unwrap();
-  ///
-  /// // Change the tickrate to 100ms, 10x what it was before.
-  /// event_sync.change_tickrate(tickrate * 10);
-  ///
-  /// // Ensure that 1 tick has passed, which is now 100ms.
-  /// assert_eq!(event_sync.ticks_since_started().unwrap(), 1);
-  /// // Ensure that the tickrate is now 100ms instead of the prior 10ms.
-  /// assert_eq!(event_sync.get_tickrate(), 100);
+  /// event_sync.unpause().unwrap();
+  /// assert_eq!(event_sync.ticks_since_started(), Ok(1)); // Only 1 tick has passed while this EventSync wasn't paused.
   /// ```
   ///
   /// # EventSyncs are connected
   ///
   /// ```
-  /// use event_sync::*;
+  /// use event_sync::EventSync;
   ///
-  /// let tickrate = 10; // 10ms tickrate.
-  /// let event_sync = EventSync::new(tickrate);
-  /// let mut other_event_sync = event_sync.clone();
-  ///
-  /// // Change the tickrate. This will change it for both EventSyncs.
-  /// other_event_sync.change_tickrate(tickrate * 2);
-  ///
-  /// // Ensure the original EventSync's tickrate is also changed.
-  /// assert_eq!(event_sync.get_tickrate(), tickrate * 2);
-  /// ```
-  pub fn change_tickrate(&mut self, new_tickrate: u32) {
-    self.write_inner().tickrate = new_tickrate.max(1);
-  }
-
-  /// Returns the internal tickrate.
-  ///
-  /// # Examples
-  ///
-  /// ```
-  /// use event_sync::*;
-  ///
-  /// let tickrate = 10; // 10ms tickrate.
-  /// let event_sync = EventSync::new(tickrate);
+  /// let tickrate = 10; // 10ms between every tick
+  /// let mut event_sync = EventSync::new(tickrate);
   /// let other_event_sync = event_sync.clone();
   ///
-  /// assert_eq!(event_sync.get_tickrate(), tickrate);
-  /// assert_eq!(other_event_sync.get_tickrate(), tickrate);
-  /// ```
-  pub fn get_tickrate(&self) -> u32 {
-    self.read_inner().tickrate
-  }
-
-  /// Waits until an absolute tick has occurred since EventSync creation.
+  /// event_sync.pause();
   ///
-  /// That means, if you created an instance of EventSync with a tickrate of 10ms,
-  /// and you want to wait until 1 second has passed since creation.
-  /// You would wait until the 100th tick, as 100 ticks would be 1 second since EventSync Creation.
-  ///
-  /// # Errors
-  ///
-  /// - An error is returned when the system time has been reversed before this EventSync was created.
-  /// - An error is returned when the given time to wait for has already occurred.
-  /// - An error is returned if the EventSync is paused.
-  ///
-  /// # Usage
+  /// assert!(other_event_sync.is_paused());
   ///
   /// ```
-  /// use event_sync::EventSync;
-  ///
-  /// let tickrate = 10; // 10ms between every tick
-  /// let event_sync = EventSync::new(tickrate);
-  ///
-  /// // Wait 1 second from the creation of event_sync.
-  /// event_sync.wait_until(100).unwrap();
-  /// ```
-  pub fn wait_until(&self, tick_to_wait_for: u64) -> Result<(), TimeError> {
-    self.err_if_paused()?;
-
-    if self.ticks_since_started()? < tick_to_wait_for {
-      let total_time_to_wait = Duration::from_millis(tick_to_wait_for * self.get_tickrate() as u64)
-        - self.time_since_started()?;
-
-      std::thread::sleep(total_time_to_wait);
-    } else {
-      return Err(TimeError::ThatTimeHasAlreadyHappened);
-    }
-
-    Ok(())
-  }
-
-  /// Waits until the next tick relative to where now is between ticks.
-  ///
-  /// Let's say the tickrate is 10ms, and the last tick was 5ms ago.
-  /// This method would sleep for 5ms to get to the next tick.
-  ///
-  /// # Errors
-  ///
-  /// - An error is returned when the system time has been reversed before this EventSync was created.
-  /// - An error is returned when the given time to wait for has already occurred.
-  /// - An error is returned if the EventSync is paused.
-  ///
-  /// # Usage
-  /// ```
-  /// use event_sync::EventSync;
-  ///
-  /// let tickrate = 10; // 10ms between every tick
-  /// let event_sync = EventSync::new(tickrate);
-  ///
-  /// // wait until the next tick
-  /// event_sync.wait_for_tick();
-  /// ```
-  pub fn wait_for_tick(&self) -> Result<(), TimeError> {
-    self.err_if_paused()?;
-
-    self.wait_for_x_ticks(1)
-  }
-
-  /// Waits for the passed in amount of ticks relative to where now is between ticks.
-  ///
-  /// Let's say the tickrate is 10ms, and the last tick was 5ms ago.
-  /// If you wanted to wait for 3 ticks, this method would sleep for 25ms, as that would be 3 ticks from now.
-  ///
-  /// # Errors
-  ///
-  /// - An error is returned when the system time has been reversed before this EventSync was created.
-  /// - An error is returned when the given time to wait for has already occurred.
-  /// - An error is returned if the EventSync is paused.
-  ///
-  /// # Usage
-  /// ```
-  /// use event_sync::EventSync;
-  ///
-  /// let tickrate = 10; // 10ms between every tick
-  /// let event_sync = EventSync::new(tickrate);
-  ///
-  /// // wait for 3 ticks
-  /// event_sync.wait_for_x_ticks(3);
-  /// ```
-  pub fn wait_for_x_ticks(&self, ticks_to_wait: u32) -> Result<(), TimeError> {
-    self.err_if_paused()?;
-
-    let ticks_since_started = self.ticks_since_started()?;
-
-    self.wait_until(ticks_since_started + ticks_to_wait as u64)
-  }
-
-  /// Returns the amount of time that has occurred since the creation of this instance of EventSync.
-  ///
-  /// # Errors
-  ///
-  /// - An error is returned if the EventSync is paused.
-  /// - An error is returned when the system time has been reversed to before this EventSync was created.
-  ///
-  /// # Usage
-  /// ```
-  /// use event_sync::*;
-  /// use std::time::Duration;
-  ///
-  /// let tickrate = 10; // 10ms between every tick
-  /// let event_sync = EventSync::new(tickrate);
-  ///
-  /// // Wait until 5 ticks have occurred since EventSync creation.
-  /// event_sync.wait_until(5);
-  ///
-  /// let milliseconds_since_started = event_sync.time_since_started().unwrap().as_millis();
-  ///
-  /// assert_eq!(milliseconds_since_started, 50);
-  /// ```
-  pub fn time_since_started(&self) -> Result<std::time::Duration, TimeError> {
-    self.err_if_paused()?;
-
-    self.read_inner().start_time.elapsed().map_err(Into::into)
-  }
-
-  /// Returns the amount of ticks that have occurred since the creation of this instance of EventSync.
-  ///
-  /// # Errors
-  ///
-  /// - An error is returned if the EventSync is paused.
-  /// - An error is returned when the system time has been reversed to before this EventSync was created.
-  ///
-  /// # Usage
-  ///
-  /// ```
-  /// use event_sync::*;
-  ///
-  /// let tickrate = 10; // 10ms between every tick
-  /// let event_sync = EventSync::new(tickrate);
-  ///
-  /// event_sync.wait_until(5);
-  ///
-  /// assert_eq!(event_sync.ticks_since_started(), Ok(5));
-  /// ```
-  pub fn ticks_since_started(&self) -> Result<u64, TimeError> {
-    self.err_if_paused()?;
-
-    let inner = self.read_inner();
-
-    Ok(inner.start_time.elapsed()?.as_millis() as u64 / inner.tickrate as u64)
-  }
-
-  /// Returns the amount of time that has passed since the last tick
-  ///
-  /// # Errors
-  ///
-  /// - An error is returned if the EventSync is paused.
-  /// - An error is returned when the system time has been reversed to before this EventSync was created.
-  ///
-  /// # Examples
-  ///
-  /// ```
-  /// use event_sync::EventSync;
-  ///
-  /// let tickrate = 10; // 10ms between every tick.
-  /// let event_sync = EventSync::new(tickrate);
-  ///
-  /// event_sync.wait_for_tick().unwrap();
-  ///
-  /// assert!(event_sync.time_since_last_tick().unwrap().as_micros() < 500); // Practically no time should have passed since the last tick.
-  /// ```
-  pub fn time_since_last_tick(&self) -> Result<std::time::Duration, TimeError> {
-    self.err_if_paused()?;
-
-    Ok(Duration::from_nanos(
-      (self.time_since_started()?.as_nanos() % (self.get_tickrate() as u128 * 1000000)) as u64,
-    ))
-  }
-
-  /// Returns the amount of time until the next tick will occur.
-  ///
-  /// # Errors
-  ///
-  /// - An error is returned if the EventSync is paused.
-  /// - An error is returned when the system time has been reversed to before this EventSync was created.
-  ///
-  /// # Examples
-  ///
-  /// ```
-  /// use event_sync::EventSync;
-  ///
-  /// let tickrate = 10; // 10ms between every tick.
-  /// let event_sync = EventSync::new(tickrate);
-  ///
-  /// event_sync.wait_for_tick().unwrap();
-  ///
-  /// assert!(event_sync.time_until_next_tick().unwrap().as_micros() > 500); // Practically no time should have passed since the last tick.
-  /// ```
-  pub fn time_until_next_tick(&self) -> Result<std::time::Duration, TimeError> {
-    self.err_if_paused()?;
-
-    Ok(
-      Duration::from_millis(self.get_tickrate() as u64)
-        .saturating_sub(self.time_since_last_tick()?),
-    )
-  }
-
-  /// Obtains a ReadGuard of the [`internal EventSync data`](InnerEventSync).
-  fn read_inner(&self) -> RwLockReadGuard<InnerEventSync> {
-    self.inner.read().unwrap()
-  }
-
-  /// Obtains a WriteGuard of the [`internal EventSync data`](InnerEventSync).
-  fn write_inner(&mut self) -> RwLockWriteGuard<InnerEventSync> {
-    self.inner.write().unwrap()
+  pub fn pause(&mut self) {
+    self.write_inner().pause()
   }
 }
 
