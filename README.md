@@ -29,7 +29,8 @@ event_sync.wait_for_tick();
 
 In order to use event_sync, you start by creating an instance of `EventSync`
 with `EventSync::new()`. You then pass in the desired tickrate for the EventSync
-to know how long a tick should last.
+to know how long a tick should last. (For more ways of creating an EventSync, check
+the examples)
 
 The tickrate will be an integer represented as milliseconds, and cannot go
 below 1. If you pass in 0, 1 millisecond will be set as the tickrate.
@@ -68,10 +69,10 @@ This would make it so the task in question would only start running every 20ms.
 A `Tick` can be thought of as imaginary markers in time, starting at creation of
 the EventSync, and separated by the duration of the `Tickrate`.
 
-When you wait for 1 tick, EventSync will sleep it's current thread up to the
+When you wait for 1 tick, EventSync will sleep its current thread up to the
 next tick. If you were to wait for multiple ticks, EventSync sleeps up to the
 next tick, plus the duration of the remaining ticks to wait for.
 
 Another way to describe it. Say we had a tickrate of 10ms, and it's been 5ms
-since the last tick. If you then waited 1 tick, EventSync will sleep for 5ms
-which is how long until the next tick marker.
+since the last tick. If you then waited 1 tick, EventSync will sleep for 5ms,
+which is the duration until the next tick marker.
