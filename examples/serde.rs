@@ -27,5 +27,5 @@ fn main() {
   deserialized_event_sync.unpause().unwrap();
 
   // Ensure that 2 ticks have still passed for the stored EventSync, even if 3 have technically passed real time.
-  assert_eq!(deserialized_event_sync.ticks_since_started(), Ok(2));
+  assert_eq!(deserialized_event_sync.ticks_since_started(), 2);
 }
