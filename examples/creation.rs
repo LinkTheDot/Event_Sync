@@ -20,8 +20,8 @@ fn main() {
   let paused_event_sync = EventSync::from_starting_time(TICKRATE, starting_time, true);
 
   // Ensure all the starting times are as expected.
-  assert_eq!(event_sync_zero.ticks_since_started(), Ok(0));
-  assert_eq!(event_sync_from_ticks.ticks_since_started(), Ok(2));
-  assert_eq!(event_sync_from_time.ticks_since_started(), Ok(2));
+  assert_eq!(event_sync_zero.ticks_since_started(), 0);
+  assert_eq!(event_sync_from_ticks.ticks_since_started(), 2);
+  assert_eq!(event_sync_from_time.ticks_since_started(), 2);
   assert!(paused_event_sync.is_paused());
 }

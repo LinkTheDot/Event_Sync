@@ -25,7 +25,7 @@ fn main() -> anyhow::Result<()> {
   event_sync.unpause()?;
 
   // Ensure that 3 ticks have passed in the main EventSync, even if 6 have technically passed in total.
-  assert_eq!(event_sync.ticks_since_started(), Ok(3));
+  assert_eq!(event_sync.ticks_since_started(), 3);
 
   Ok(())
 }

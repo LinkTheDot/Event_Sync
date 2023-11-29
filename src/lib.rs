@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use std::marker::PhantomData;
 use std::{
   sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard},
-  time::{Duration, SystemTime},
+  time::Duration,
 };
 
 mod errors;
@@ -53,7 +53,7 @@ mod inner;
 /// let finish = start.elapsed().as_millis();
 ///
 /// // Check that the time it took for the operation was (waited_ticks * tickrate)ms
-/// assert_eq!(finish, event_sync.time_since_started().unwrap().as_millis());
+/// assert_eq!(finish, event_sync.time_since_started().as_millis());
 /// ```
 ///
 /// # Thread Synchronization
@@ -171,7 +171,6 @@ impl<T> EventSync<T> {
   ///
   /// # Errors
   ///
-  /// - An error is returned when the system time has been reversed before this EventSync was created.
   /// - An error is returned when the given time to wait for has already occurred.
   /// - An error is returned if the EventSync is paused.
   ///
@@ -187,7 +186,11 @@ impl<T> EventSync<T> {
   /// event_sync.wait_until(100).unwrap();
   /// ```
   pub fn wait_until(&self, tick_to_wait_for: u64) -> Result<(), TimeError> {
-    self.read_inner().wait_until(tick_to_wait_for)
+    let wait_time = self.read_inner().time_until_tick_occurs(tick_to_wait_for)?;
+
+    std::thread::sleep(wait_time);
+
+    Ok(())
   }
 
   /// Waits until the next tick relative to where now is between ticks.
@@ -197,8 +200,6 @@ impl<T> EventSync<T> {
   ///
   /// # Errors
   ///
-  /// - An error is returned when the system time has been reversed before this EventSync was created.
-  /// - An error is returned when the given time to wait for has already occurred.
   /// - An error is returned if the EventSync is paused.
   ///
   /// # Usage
@@ -212,7 +213,11 @@ impl<T> EventSync<T> {
   /// event_sync.wait_for_tick();
   /// ```
   pub fn wait_for_tick(&self) -> Result<(), TimeError> {
-    self.read_inner().wait_for_tick()
+    let wait_time = self.read_inner().time_for_tick()?;
+
+    std::thread::sleep(wait_time);
+
+    Ok(())
   }
 
   /// Waits for the passed in amount of ticks relative to where now is between ticks.
@@ -222,8 +227,6 @@ impl<T> EventSync<T> {
   ///
   /// # Errors
   ///
-  /// - An error is returned when the system time has been reversed before this EventSync was created.
-  /// - An error is returned when the given time to wait for has already occurred.
   /// - An error is returned if the EventSync is paused.
   ///
   /// # Usage
@@ -237,15 +240,14 @@ impl<T> EventSync<T> {
   /// event_sync.wait_for_x_ticks(3);
   /// ```
   pub fn wait_for_x_ticks(&self, ticks_to_wait: u32) -> Result<(), TimeError> {
-    self.read_inner().wait_for_x_ticks(ticks_to_wait)
+    let wait_time = self.read_inner().time_for_x_ticks(ticks_to_wait)?;
+
+    std::thread::sleep(wait_time);
+
+    Ok(())
   }
 
   /// Returns the amount of time that has occurred since the creation of this instance of EventSync.
-  ///
-  /// # Errors
-  ///
-  /// - An error is returned if the EventSync is paused.
-  /// - An error is returned when the system time has been reversed to before this EventSync was created.
   ///
   /// # Usage
   /// ```
@@ -258,20 +260,15 @@ impl<T> EventSync<T> {
   /// // Wait until 5 ticks have occurred since EventSync creation.
   /// event_sync.wait_until(5);
   ///
-  /// let milliseconds_since_started = event_sync.time_since_started().unwrap().as_millis();
+  /// let milliseconds_since_started = event_sync.time_since_started().as_millis();
   ///
   /// assert_eq!(milliseconds_since_started, 50);
   /// ```
-  pub fn time_since_started(&self) -> Result<std::time::Duration, TimeError> {
+  pub fn time_since_started(&self) -> std::time::Duration {
     self.read_inner().time_since_started()
   }
 
   /// Returns the amount of ticks that have occurred since the creation of this instance of EventSync.
-  ///
-  /// # Errors
-  ///
-  /// - An error is returned if the EventSync is paused.
-  /// - An error is returned when the system time has been reversed to before this EventSync was created.
   ///
   /// # Usage
   ///
@@ -283,19 +280,14 @@ impl<T> EventSync<T> {
   ///
   /// event_sync.wait_until(5);
   ///
-  /// assert_eq!(event_sync.ticks_since_started(), Ok(5));
+  /// assert_eq!(event_sync.ticks_since_started(), 5);
   /// ```
-  pub fn ticks_since_started(&self) -> Result<u64, TimeError> {
+  pub fn ticks_since_started(&self) -> u64 {
     self.read_inner().ticks_since_started()
   }
 
   /// Returns the amount of time that has passed since the last tick
   ///
-  /// # Errors
-  ///
-  /// - An error is returned if the EventSync is paused.
-  /// - An error is returned when the system time has been reversed to before this EventSync was created.
-  ///
   /// # Examples
   ///
   /// ```
@@ -306,19 +298,14 @@ impl<T> EventSync<T> {
   ///
   /// event_sync.wait_for_tick().unwrap();
   ///
-  /// assert!(event_sync.time_since_last_tick().unwrap().as_micros() < 500); // Practically no time should have passed since the last tick.
+  /// assert!(event_sync.time_since_last_tick().as_micros() < 500); // Practically no time should have passed since the last tick.
   /// ```
-  pub fn time_since_last_tick(&self) -> Result<std::time::Duration, TimeError> {
+  pub fn time_since_last_tick(&self) -> std::time::Duration {
     self.read_inner().time_since_last_tick()
   }
 
   /// Returns the amount of time until the next tick will occur.
   ///
-  /// # Errors
-  ///
-  /// - An error is returned if the EventSync is paused.
-  /// - An error is returned when the system time has been reversed to before this EventSync was created.
-  ///
   /// # Examples
   ///
   /// ```
@@ -329,9 +316,9 @@ impl<T> EventSync<T> {
   ///
   /// event_sync.wait_for_tick().unwrap();
   ///
-  /// assert!(event_sync.time_until_next_tick().unwrap().as_micros() > 500); // Practically no time should have passed since the last tick.
+  /// assert!(event_sync.time_until_next_tick().as_micros() > 500); // Practically no time should have passed since the last tick.
   /// ```
-  pub fn time_until_next_tick(&self) -> Result<std::time::Duration, TimeError> {
+  pub fn time_until_next_tick(&self) -> std::time::Duration {
     self.read_inner().time_until_next_tick()
   }
 
@@ -376,7 +363,7 @@ impl EventSync<Mutable> {
   /// let finish = start.elapsed().as_millis();
   ///
   /// // Check that the time it took for the operation was (waited_ticks * tickrate)ms
-  /// assert_eq!(finish, event_sync.time_since_started().unwrap().as_millis());
+  /// assert_eq!(finish, event_sync.time_since_started().as_millis());
   /// ```
   ///
   /// # Thread Synchronization
@@ -405,7 +392,7 @@ impl EventSync<Mutable> {
   /// handle.join().unwrap();
   /// ```
   pub fn new(tickrate_in_milliseconds: u32) -> Self {
-    Self::new_event_sync(tickrate_in_milliseconds, SystemTime::now(), false)
+    Self::new_event_sync(tickrate_in_milliseconds, Duration::default(), false)
   }
 
   /// Creates a new instance of EventSync that starts out paused.
@@ -419,10 +406,10 @@ impl EventSync<Mutable> {
   /// let event_sync = EventSync::new_paused(tickrate); // Create an event_sync that starts out paused.
   ///
   /// assert!(event_sync.is_paused());
-  /// assert!(event_sync.time_since_started().is_err());
+  /// assert!(event_sync.wait_for_tick().is_err());
   /// ```
   pub fn new_paused(tickrate_in_milliseconds: u32) -> Self {
-    Self::new_event_sync(tickrate_in_milliseconds, SystemTime::now(), true)
+    Self::new_event_sync(tickrate_in_milliseconds, Duration::default(), true)
   }
 
   /// Creates a new instance of [`EventSync`](EventSync) with the given starting time.
@@ -439,7 +426,7 @@ impl EventSync<Mutable> {
   /// let starting_time = Duration::from_millis(30); // Start 30ms ahead.
   /// let event_sync = EventSync::from_starting_time(tickrate, starting_time, false);
   ///
-  /// assert_eq!(event_sync.ticks_since_started().unwrap(), 3);
+  /// assert_eq!(event_sync.ticks_since_started(), 3);
   /// ```
   ///
   /// # Starting Paused
@@ -455,16 +442,14 @@ impl EventSync<Mutable> {
   /// assert!(event_sync.is_paused());
   /// event_sync.unpause().unwrap();
   ///
-  /// assert_eq!(event_sync.ticks_since_started().unwrap(), 3);
+  /// assert_eq!(event_sync.ticks_since_started(), 3);
   /// ```
   pub fn from_starting_time(
     tickrate_in_milliseconds: u32,
-    starting_time: Duration,
+    elapsed_time: Duration,
     start_paused: bool,
   ) -> Self {
-    let starting_time = SystemTime::now() - starting_time;
-
-    Self::new_event_sync(tickrate_in_milliseconds, starting_time, start_paused)
+    Self::new_event_sync(tickrate_in_milliseconds, elapsed_time, start_paused)
   }
 
   /// Creates a new instance of [`EventSync`](EventSync) with the given starting tick.
@@ -481,7 +466,7 @@ impl EventSync<Mutable> {
   /// let starting_tick = 3; // Start 3 ticks ahead.
   /// let event_sync = EventSync::from_starting_tick(tickrate, starting_tick, false);
   ///
-  /// assert_eq!(event_sync.ticks_since_started().unwrap(), 3);
+  /// assert_eq!(event_sync.ticks_since_started(), 3);
   /// ```
   ///
   /// # Starting Paused
@@ -497,22 +482,22 @@ impl EventSync<Mutable> {
   /// assert!(event_sync.is_paused());
   /// event_sync.unpause().unwrap();
   ///
-  /// assert_eq!(event_sync.ticks_since_started().unwrap(), 3);
+  /// assert_eq!(event_sync.ticks_since_started(), 3);
   /// ```
   pub fn from_starting_tick(
     tickrate_in_milliseconds: u32,
     starting_tick: u32,
     start_paused: bool,
   ) -> Self {
-    let starting_time = Duration::from_millis((starting_tick * tickrate_in_milliseconds).into());
-    let starting_time = SystemTime::now() - starting_time;
+    let elapsed_time = Duration::from_millis((starting_tick * tickrate_in_milliseconds).into());
 
-    Self::new_event_sync(tickrate_in_milliseconds, starting_time, start_paused)
+    Self::new_event_sync(tickrate_in_milliseconds, elapsed_time, start_paused)
   }
 
-  /// Create a new [`EventSync`](EventSync) from the given tickrate and system time.
-  fn new_event_sync(tickrate: u32, start_time: SystemTime, is_paused: bool) -> Self {
-    let inner = InnerEventSync::new(tickrate, start_time, is_paused);
+  /// Create a new [`EventSync`](EventSync) from the given tickrate and whether or not the EventSync is started paused.
+  /// If paused, the stored passed time will be the passed in elapsed_time.
+  fn new_event_sync(tickrate: u32, elapsed_time: Duration, is_paused: bool) -> Self {
+    let inner = InnerEventSync::new(tickrate, elapsed_time, is_paused);
 
     Self {
       inner: Arc::new(RwLock::new(inner)),
@@ -554,7 +539,7 @@ impl EventSync<Mutable> {
   ///
   /// event_sync.restart(); // Restart the EventSync.
   ///
-  /// assert_eq!(event_sync.ticks_since_started(), Ok(0)); // 0 ticks is returned because the EventSync was restarted.
+  /// assert_eq!(event_sync.ticks_since_started(), 0); // 0 ticks is returned because the EventSync was restarted.
   /// ```
   pub fn restart(&mut self) {
     self.write_inner().restart();
@@ -574,7 +559,7 @@ impl EventSync<Mutable> {
   ///
   /// event_sync.restart_paused(); // Restart the EventSync.
   ///
-  /// assert!(event_sync.ticks_since_started().is_err());
+  /// assert!(event_sync.is_paused());
   /// ```
   pub fn restart_paused(&mut self) {
     self.write_inner().restart_paused();
@@ -601,7 +586,7 @@ impl EventSync<Mutable> {
   /// event_sync.change_tickrate(tickrate * 10);
   ///
   /// // Ensure that 1 tick has passed, which is now 100ms.
-  /// assert_eq!(event_sync.ticks_since_started().unwrap(), 1);
+  /// assert_eq!(event_sync.ticks_since_started(), 1);
   /// // Ensure that the tickrate is now 100ms instead of the prior 10ms.
   /// assert_eq!(event_sync.get_tickrate(), 100);
   /// ```
@@ -632,10 +617,6 @@ impl EventSync<Mutable> {
   ///
   /// Calling unpause when the EventSync is already running does nothing.
   ///
-  /// # Errors
-  ///
-  /// - An error is returned if the system time was reversed to before EventSync start time before calling [`pause`](EventSync::pause).
-  ///
   /// # Examples
   ///
   /// ```
@@ -651,7 +632,7 @@ impl EventSync<Mutable> {
   /// other_event_sync.wait_for_tick().unwrap(); // Desync from the paused EventSync.
   ///
   /// event_sync.unpause().unwrap();
-  /// assert_eq!(event_sync.ticks_since_started(), Ok(1)); // Only 1 tick has passed while this EventSync wasn't paused.
+  /// assert_eq!(event_sync.ticks_since_started(), 1); // Only 1 tick has passed while this EventSync wasn't paused.
   /// ```
   ///
   /// # EventSyncs are connected
@@ -681,10 +662,6 @@ impl EventSync<Mutable> {
   ///
   /// Calling pause when already paused does nothing.
   ///
-  /// # Warning
-  ///
-  /// If the system time was reversed to before EventSync start time before calling pause, the EventSync cannot be unpaused, and will return an error.
-  ///
   /// # Examples
   ///
   /// ```
@@ -700,7 +677,7 @@ impl EventSync<Mutable> {
   /// other_event_sync.wait_for_tick().unwrap(); // Desync from the paused EventSync.
   ///
   /// event_sync.unpause().unwrap();
-  /// assert_eq!(event_sync.ticks_since_started(), Ok(1)); // Only 1 tick has passed while this EventSync wasn't paused.
+  /// assert_eq!(event_sync.ticks_since_started(), 1); // Only 1 tick has passed while this EventSync wasn't paused.
   /// ```
   ///
   /// # EventSyncs are connected
@@ -774,7 +751,7 @@ mod tests {
 
       let ticks_since_started = event_sync.ticks_since_started();
 
-      assert_eq!(ticks_since_started, Ok(5));
+      assert_eq!(ticks_since_started, 5);
     }
 
     #[test]
@@ -797,7 +774,7 @@ mod tests {
 
     event_sync.wait_until(2).unwrap();
 
-    let time_since_started = event_sync.time_since_started().unwrap();
+    let time_since_started = event_sync.time_since_started();
 
     assert_eq!(time_since_started.as_millis(), TEST_TICKRATE as u128 * 2);
   }
@@ -810,7 +787,7 @@ mod tests {
 
     let ticks_since_started = event_sync.ticks_since_started();
 
-    assert_eq!(ticks_since_started, Ok(2));
+    assert_eq!(ticks_since_started, 2);
   }
 
   #[test]
@@ -821,7 +798,7 @@ mod tests {
 
     let ticks_since_started = event_sync.ticks_since_started();
 
-    assert_eq!(ticks_since_started, Ok(1));
+    assert_eq!(ticks_since_started, 1);
   }
 
   #[test]
@@ -831,7 +808,7 @@ mod tests {
 
     event_sync.wait_for_tick().unwrap();
 
-    let time_since_last_tick = event_sync.time_since_last_tick().unwrap();
+    let time_since_last_tick = event_sync.time_since_last_tick();
 
     assert!((tickrate as u128 * 1000000) > time_since_last_tick.as_nanos());
     assert_ne!(time_since_last_tick.as_nanos(), 0);
@@ -846,7 +823,7 @@ mod tests {
 
     std::thread::sleep(Duration::from_millis(extra_wait_time as u64));
 
-    let time_since_last_tick = event_sync.time_since_last_tick().unwrap();
+    let time_since_last_tick = event_sync.time_since_last_tick();
 
     assert_eq!(time_since_last_tick.as_millis(), extra_wait_time);
   }
@@ -864,7 +841,7 @@ mod tests {
     // Converting directly to milliseconds will round down, which will always be 7.
     // We want to round up in the case of milliseconds, making it always be 8.
     let time_until_next_tick =
-      (event_sync.time_until_next_tick().unwrap().as_micros() as f64 / 1000.0).ceil();
+      (event_sync.time_until_next_tick().as_micros() as f64 / 1000.0).ceil();
 
     println!("{:?}", time_until_next_tick);
     assert_eq!(
@@ -882,10 +859,7 @@ mod tests {
     fn from_ticks() {
       let event_sync = EventSync::from_starting_tick(TEST_TICKRATE, STARTING_TICKS, false);
 
-      assert_eq!(
-        event_sync.ticks_since_started().unwrap(),
-        STARTING_TICKS as u64
-      );
+      assert_eq!(event_sync.ticks_since_started(), STARTING_TICKS as u64);
     }
 
     #[test]
@@ -896,10 +870,7 @@ mod tests {
 
       event_sync.unpause().unwrap();
 
-      assert_eq!(
-        event_sync.ticks_since_started().unwrap(),
-        STARTING_TICKS as u64
-      );
+      assert_eq!(event_sync.ticks_since_started(), STARTING_TICKS as u64);
     }
 
     #[test]
@@ -907,10 +878,7 @@ mod tests {
       let starting_time = Duration::from_millis((STARTING_TICKS * TEST_TICKRATE).into());
       let event_sync = EventSync::from_starting_time(TEST_TICKRATE, starting_time, false);
 
-      assert_eq!(
-        event_sync.ticks_since_started().unwrap(),
-        STARTING_TICKS as u64
-      );
+      assert_eq!(event_sync.ticks_since_started(), STARTING_TICKS as u64);
     }
 
     #[test]
@@ -922,10 +890,7 @@ mod tests {
 
       event_sync.unpause().unwrap();
 
-      assert_eq!(
-        event_sync.ticks_since_started().unwrap(),
-        STARTING_TICKS as u64
-      );
+      assert_eq!(event_sync.ticks_since_started(), STARTING_TICKS as u64);
     }
   }
 
@@ -939,22 +904,6 @@ mod tests {
     assert_eq!(event_sync.wait_for_tick(), Err(TimeError::EventSyncPaused));
     assert_eq!(
       event_sync.wait_for_x_ticks(1),
-      Err(TimeError::EventSyncPaused)
-    );
-    assert_eq!(
-      event_sync.time_since_started(),
-      Err(TimeError::EventSyncPaused)
-    );
-    assert_eq!(
-      event_sync.ticks_since_started(),
-      Err(TimeError::EventSyncPaused)
-    );
-    assert_eq!(
-      event_sync.time_since_last_tick(),
-      Err(TimeError::EventSyncPaused)
-    );
-    assert_eq!(
-      event_sync.time_until_next_tick(),
       Err(TimeError::EventSyncPaused)
     );
   }
@@ -975,7 +924,7 @@ mod tests {
 
       event_sync.unpause().unwrap();
 
-      assert_eq!(event_sync.ticks_since_started(), Ok(3));
+      assert_eq!(event_sync.ticks_since_started(), 3);
     }
 
     #[test]
@@ -991,7 +940,7 @@ mod tests {
       event_sync.unpause().unwrap();
       event_sync.wait_for_tick().unwrap();
 
-      assert_eq!(event_sync.ticks_since_started(), Ok(4));
+      assert_eq!(event_sync.ticks_since_started(), 4);
     }
 
     #[test]
@@ -1004,7 +953,7 @@ mod tests {
 
       event_sync.wait_for_x_ticks(2).unwrap();
 
-      assert_eq!(event_sync.ticks_since_started(), Ok(2));
+      assert_eq!(event_sync.ticks_since_started(), 2);
       assert!(!event_sync.is_paused());
     }
 
@@ -1016,7 +965,7 @@ mod tests {
 
       let expected_result = Err(TimeError::EventSyncPaused);
 
-      let result = event_sync.time_since_started();
+      let result = event_sync.wait_for_tick();
 
       assert_eq!(result, expected_result);
     }
@@ -1044,7 +993,7 @@ mod tests {
 
       deserialized_event_sync.unpause().unwrap();
 
-      assert_eq!(deserialized_event_sync.ticks_since_started(), Ok(1));
+      assert_eq!(deserialized_event_sync.ticks_since_started(), 1);
     }
 
     #[test]
@@ -1063,7 +1012,7 @@ mod tests {
 
       deserialized_event_sync.unpause().unwrap();
 
-      assert_eq!(deserialized_event_sync.ticks_since_started(), Ok(1));
+      assert_eq!(deserialized_event_sync.ticks_since_started(), 1);
     }
   }
 
@@ -1083,7 +1032,7 @@ mod tests {
     event_sync.change_tickrate(TEST_TICKRATE * 2);
 
     assert_eq!(event_sync.get_tickrate(), TEST_TICKRATE * 2);
-    assert_eq!(event_sync.ticks_since_started(), Ok(1));
+    assert_eq!(event_sync.ticks_since_started(), 1);
   }
 
   #[test]
