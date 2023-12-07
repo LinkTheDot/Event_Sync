@@ -699,23 +699,15 @@ impl EventSync<Mutable> {
   }
 }
 
-impl PartialEq for EventSync {
+impl<T> PartialEq for EventSync<T> {
   fn eq(&self, other: &Self) -> bool {
     *self.read_inner() == *other.read_inner()
   }
 }
 
-impl Eq for EventSync {}
+impl<T> Eq for EventSync<T> {}
 
-impl PartialEq for EventSync<Immutable> {
-  fn eq(&self, other: &Self) -> bool {
-    *self.read_inner() == *other.read_inner()
-  }
-}
-
-impl Eq for EventSync<Immutable> {}
-
-impl std::fmt::Debug for EventSync {
+impl<T> std::fmt::Debug for EventSync<T> {
   fn fmt(
     &self,
     formatter: &mut std::fmt::Formatter<'_>,
@@ -724,7 +716,7 @@ impl std::fmt::Debug for EventSync {
   }
 }
 
-impl std::fmt::Display for EventSync {
+impl<T> std::fmt::Display for EventSync<T> {
   fn fmt(
     &self,
     formatter: &mut std::fmt::Formatter<'_>,
@@ -1052,5 +1044,45 @@ mod tests {
     }
 
     let _ = return_anyhow_error();
+  }
+
+  #[test]
+  fn mutable_partial_eq_logic() {
+    let event_sync = EventSync::new(1);
+    let copied_event_sync = event_sync.clone();
+    let separate_event_sync = EventSync::new(1);
+
+    assert_eq!(event_sync, copied_event_sync);
+    assert_ne!(event_sync, separate_event_sync);
+    assert_ne!(copied_event_sync, separate_event_sync);
+  }
+
+  #[test]
+  fn immutable_partial_eq_logic() {
+    let event_sync = EventSync::new(1);
+    let copied_event_sync_1 = event_sync.clone_immutable();
+    let copied_event_sync_2 = event_sync.clone_immutable();
+    let separate_event_sync = EventSync::new(1);
+    let separate_copied_event_sync = separate_event_sync.clone_immutable();
+
+    assert_ne!(event_sync, separate_event_sync);
+    assert_ne!(copied_event_sync_1, separate_copied_event_sync);
+    assert_eq!(copied_event_sync_1, copied_event_sync_2);
+  }
+
+  #[test]
+  fn debug_and_display_logic() {
+    let event_sync = EventSync::new(1);
+    let copied_event_sync = event_sync.clone_immutable();
+
+    let _mutable_debug = format!("{:?}", event_sync);
+    let _mutable_display = format!("{}", event_sync);
+
+    let _immutable_debug = format!("{:?}", copied_event_sync);
+    let _immutable_display = format!("{}", copied_event_sync);
+
+    // Can't compare as microseconds of time would pass between each format call.
+    // This is mostly to test if both mutable and immutable can event format into Debug and Display
+    // in the first place.
   }
 }
