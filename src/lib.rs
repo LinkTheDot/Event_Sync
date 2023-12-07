@@ -707,6 +707,14 @@ impl PartialEq for EventSync {
 
 impl Eq for EventSync {}
 
+impl PartialEq for EventSync<Immutable> {
+  fn eq(&self, other: &Self) -> bool {
+    *self.read_inner() == *other.read_inner()
+  }
+}
+
+impl Eq for EventSync<Immutable> {}
+
 impl std::fmt::Debug for EventSync {
   fn fmt(
     &self,
