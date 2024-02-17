@@ -85,7 +85,8 @@ mod inner;
 /// # Permissions
 ///
 /// Of course, you don't want just anyone to be able to change whatever they want on an EventSync.
-/// To prevent that you can clone an event sync with an Immutable tag.
+/// To prevent that, event_sync provides two states for an EventSync to be in.
+/// Those being [`Mutable`](Mutable), and [`Immutable`](Immutable).
 ///
 /// By calling [`event_sync.clone_immutable()`](EventSync::clone_immutable), you create a copy of the EventSync
 /// that cannot call any methods requiring &mut self.
@@ -117,9 +118,45 @@ pub struct EventSync<Access = Mutable> {
 }
 
 /// A state for an EventSync to prevent methods with &mut from being called.
+///
+/// Any copy of [`EventSync`](EventSync) with this label will be unable to manipulate the underlying data.
+///
+/// # Example
+///
+/// ```compile_fail
+/// use event_sync::*;
+///
+/// let tickrate = 10; // 10ms between every tick.
+/// let master_event_sync: EventSync<Mutable> = EventSync::new(tickrate);
+///
+/// let mut immutable_event_sync: EventSync<Immutable> = master_event_sync.clone_immutable();
+///
+/// // Does not compile.
+/// immutable_event_sync.change_tickrate(20);
+/// ```
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Immutable;
 /// A state for an EventSync to give access to all methods.
+///
+/// Any copy of [`EventSync`](EventSync) with this label will be able to modify any underlying data.
+/// The data changed will affect any EventSync connected to this one.
+///
+/// To create an [`EventSync<Immutable>`](Immutable) , use the [`.clone_immutable()`](EventSync::clone_immutable) method on any EventSync with the Mutable label, or clone off an existing Immutable one.
+///
+/// # Example
+///
+/// ```
+/// use event_sync::*;
+///
+/// let tickrate = 10;
+/// let mut master_event_sync = EventSync::new(tickrate);
+///
+/// let mut mutable_event_sync = master_event_sync.clone();
+///
+/// mutable_event_sync.change_tickrate(20);
+///
+/// assert_eq!(master_event_sync.get_tickrate(), 20);
+/// ```
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Mutable;
 
@@ -731,7 +768,6 @@ impl Default for EventSync {
   }
 }
 
-// Tests have a chance to fail due to their time sensitive nature.
 #[cfg(test)]
 mod tests {
   use super::*;
@@ -1029,6 +1065,7 @@ mod tests {
 
     event_sync.wait_for_x_ticks(2).unwrap();
 
+    // Does not compile.
     event_sync.change_tickrate(TEST_TICKRATE * 2);
 
     assert_eq!(event_sync.get_tickrate(), TEST_TICKRATE * 2);
