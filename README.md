@@ -76,3 +76,39 @@ next tick, plus the duration of the remaining ticks to wait for.
 Another way to describe it. Say we had a tickrate of 10ms, and it's been 5ms
 since the last tick. If you then waited 1 tick, EventSync will sleep for 5ms,
 which is the duration until the next tick marker.
+
+## Permissions
+
+EventSync can exist in two states, `Mutable` and `Immutable`.
+These states indicate which methods can be called on an instance of `EventSync`.
+
+The reason these exist is due to the connectedness of an EventSync. There needs to be some sort
+of hierarchy involved so that not just anybody can change the world.
+
+If you had some sort of master struct that holds an EventSync, this is what would hold a Mutable copy:
+
+```rust
+use event_sync::*;
+
+struct MasterTimeKeeper {
+  synchronizer: EventSync<Mutable>,
+}
+```
+
+If you wanted to pass this around to any other threads you wanted to synchronize, you would want to pass Immutable copies
+of this master synchronizer:
+
+```rust
+use event_sync::*;
+
+struct MasterTimeKeeper {
+  synchronizer: EventSync<Mutable>,
+}
+
+let tickrate = 10;
+let who = MasterTimeKeeper { synchronizer: EventSync::new(tickrate) };
+
+let connected_who: EventSync<Immutable> = who.clone_immutable();
+
+// Pass the connected EventSync anywhere it's needed.
+```
