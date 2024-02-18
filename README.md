@@ -108,7 +108,7 @@ struct MasterTimeKeeper {
 let tickrate = 10;
 let who = MasterTimeKeeper { synchronizer: EventSync::new(tickrate) };
 
-let connected_who: EventSync<Immutable> = who.clone_immutable();
+let connected_who: EventSync<Immutable> = who.synchronizer.clone_immutable();
 
 // Pass the connected EventSync anywhere it's needed.
 ```
