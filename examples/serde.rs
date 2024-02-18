@@ -28,4 +28,6 @@ fn main() {
 
   // Ensure that 2 ticks have still passed for the stored EventSync, even if 3 have technically passed real time.
   assert_eq!(deserialized_event_sync.ticks_since_started(), 2);
+
+  // The stored and still live instances of EventSync are now disconnected.
 }
