@@ -161,7 +161,7 @@ pub struct Immutable;
 pub struct Mutable;
 
 impl<T> EventSync<T> {
-  /// Returns true if this instance of EventSyunc has been paused.
+  /// Returns true if this instance of EventSync has been paused.
   ///
   /// Call [`event_sync.unpause()`](EventSync::unpause) to unpause the eventsync.
   /// The time that's passed before pausing is retained.
@@ -451,7 +451,7 @@ impl EventSync<Mutable> {
 
   /// Creates a new instance of [`EventSync`](EventSync) with the given starting time.
   ///
-  /// Takes an extra arguement to determine if the EventSync should be paused upon creation or not.
+  /// Takes an extra argument to determine if the EventSync should be paused upon creation or not.
   ///
   /// # Example
   ///
@@ -491,7 +491,7 @@ impl EventSync<Mutable> {
 
   /// Creates a new instance of [`EventSync`](EventSync) with the given starting tick.
   ///
-  /// Takes an extra arguement to determine if the EventSync should be paused upon creation or not.
+  /// Takes an extra argument to determine if the EventSync should be paused upon creation or not.
   ///
   /// # Example
   ///
@@ -582,7 +582,7 @@ impl EventSync<Mutable> {
     self.write_inner().restart();
   }
 
-  /// Restarts the startimg time, and changes self to paused.
+  /// Restarts the starting time, and changes self to paused.
   /// This will also restart and pause the time for every EventSync cloned off of this one.
   ///
   /// # Examples
